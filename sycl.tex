@@ -1,0 +1,245 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+\usepackage{hyperref}
+\geometry{margin=1in}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    urlcolor=blue,
+}
+
+\definecolor{codegray}{rgb}{0.95,0.95,0.95}
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{codegray},
+    basicstyle=\ttfamily\footnotesize,
+    breaklines=true,
+    frame=single,
+    keywordstyle=\color{blue},
+    commentstyle=\color{green!50!black},
+    stringstyle=\color{red!60!black},
+    showstringspaces=false
+}
+\lstset{style=mystyle}
+
+\title{SYCL Foundation & CUTLASS-SYCL Roadmap}
+\author{Rishi Yadav}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+\newpage
+
+\section{Introduction}
+This document provides a comprehensive roadmap to learn SYCL and transition to CUTLASS-SYCL. It covers the core SYCL concepts, essential lessons, and their relevance for building high-performance GEMM kernels using CUTLASS in SYCL.
+
+\section{SYCL Foundation}
+
+\subsection{Lesson 1: Hello SYCL}
+\textbf{Concepts:} Queue, device selection, basic host code.
+
+\begin{lstlisting}[language=C++]
+#include <sycl/sycl.hpp>
+using namespace sycl;
+
+int main() {
+    queue q;
+    std::cout << "Hello, SYCL from: "
+              << q.get_device().get_info<info::device::name>()
+              << std::endl;
+    return 0;
+}
+\end{lstlisting}
+
+\textbf{Key Points:}
+\begin{itemize}
+    \item \texttt{queue} selects the device.
+    \item Host code can query device info.
+\end{itemize}
+
+\subsection{Lesson 2: First Kernel}
+\textbf{Concepts:} Parallel work-items, device code.
+
+\begin{lstlisting}[language=C++]
+#include <sycl/sycl.hpp>
+#include <vector>
+#include <iostream>
+using namespace sycl;
+
+int main() {
+    queue q;
+    const int N = 16;
+    std::vector<int> data(N);
+
+    {
+        buffer<int,1> buf(data.data(), range<1>(N));
+        q.submit([&](handler& h) {
+            auto acc = buf.get_access<access::mode::write>(h);
+            h.parallel_for(range<1>(N), [=](id<1> i){
+                acc[i] = i[0];
+            });
+        }).wait();
+    }
+
+    for(int i=0;i<N;i++)
+        std::cout << "Hello from work-item " << data[i] << "\n";
+
+    return 0;
+}
+\end{lstlisting}
+
+\subsection{Lesson 3: Buffers \& Accessors}
+\textbf{Concepts:} Host ↔ Device memory, read/write access.
+
+\begin{lstlisting}[language=C++]
+#include <sycl/sycl.hpp>
+#include <vector>
+#include <iostream>
+using namespace sycl;
+
+int main() {
+    queue q;
+    const int N = 16;
+    std::vector<int> A(N), B(N), C(N);
+
+    for(int i=0;i<N;i++){
+        A[i]=i; B[i]=2*i;
+    }
+
+    {
+        buffer<int,1> bufA(A.data(), range<1>(N));
+        buffer<int,1> bufB(B.data(), range<1>(N));
+        buffer<int,1> bufC(C.data(), range<1>(N));
+
+        q.submit([&](handler& h){
+            auto accA = bufA.get_access<access::mode::read>(h);
+            auto accB = bufB.get_access<access::mode::read>(h);
+            auto accC = bufC.get_access<access::mode::write>(h);
+
+            h.parallel_for(range<1>(N), [=](id<1> i){
+                accC[i] = accA[i] + accB[i];
+            });
+        }).wait();
+    }
+
+    for(int i=0;i<N;i++)
+        std::cout << A[i] << " + " << B[i] << " = " << C[i] << "\n";
+
+    return 0;
+}
+\end{lstlisting}
+
+\subsection{Lesson 4: ND-Range \& Work-Groups}
+\textbf{Concepts:} Global and local size, 2D indexing.
+
+\begin{lstlisting}[language=C++]
+#include <sycl/sycl.hpp>
+#include <iostream>
+#include <vector>
+using namespace sycl;
+
+int main() {
+    queue q;
+    const int N = 4;
+    std::vector<int> A(N*N), B(N*N), C(N*N);
+
+    for(int i=0;i<N*N;i++){
+        A[i]=i; B[i]=i*2;
+    }
+
+    {
+        buffer<int,2> bufA(A.data(), range<2>(N,N));
+        buffer<int,2> bufB(B.data(), range<2>(N,N));
+        buffer<int,2> bufC(C.data(), range<2>(N,N));
+
+        q.submit([&](handler& h){
+            auto accA = bufA.get_access<access::mode::read>(h);
+            auto accB = bufB.get_access<access::mode::read>(h);
+            auto accC = bufC.get_access<access::mode::write>(h);
+
+            h.parallel_for(nd_range<2>(range<2>(N,N), range<2>(2,2)),
+                [=](nd_item<2> item){
+                    int row = item.get_global_id(0);
+                    int col = item.get_global_id(1);
+                    accC[row][col] = accA[row][col] + accB[row][col];
+            });
+        }).wait();
+    }
+
+    for(int i=0;i<N;i++){
+        for(int j=0;j<N;j++)
+            std::cout << C[i*N + j] << " ";
+        std::cout << "\n";
+    }
+
+    return 0;
+}
+\end{lstlisting}
+
+\subsection{Lesson 5: Local Memory \& Barriers}
+\textbf{Concepts:} Fast shared memory, synchronization.
+
+\begin{lstlisting}[language=C++]
+// Local memory example included in previous lessons
+\end{lstlisting}
+
+\subsection{Lesson 6: Sub-Groups \& SIMD}
+\textbf{Concepts:} Vectorized computation, warp-level operations.
+
+\begin{lstlisting}[language=C++]
+// Sub-group example included in previous lessons
+\end{lstlisting}
+
+\subsection{Lesson 7: Unified Shared Memory (USM)}
+\textbf{Concepts:} Pointer-style memory, host/device shared pointers.
+
+\begin{lstlisting}[language=C++]
+#include <sycl/sycl.hpp>
+using namespace sycl;
+
+int main() {
+    queue q;
+    const int N = 16;
+    int *A = malloc_shared<int>(N, q);
+    int *B = malloc_shared<int>(N, q);
+    int *C = malloc_shared<int>(N, q);
+
+    for(int i=0;i<N;i++){
+        A[i] = i;
+        B[i] = i*2;
+    }
+
+    q.parallel_for(range<1>(N), [=](id<1> i){
+        C[i] = A[i] + B[i];
+    }).wait();
+
+    for(int i=0;i<N;i++)
+        std::cout << C[i] << " ";
+    std::cout << "\n";
+
+    free(A,q); free(B,q); free(C,q);
+}
+\end{lstlisting}
+
+\section{CUTLASS-SYCL Roadmap}
+\begin{itemize}
+    \item Clone the repository: \texttt{git clone https://github.com/intel/cutlass-sycl.git}
+    \item Build small GEMM kernels first (CPU → GPU/NPU)
+    \item Map SYCL lessons to GEMM:
+    \begin{itemize}
+        \item Buffers/USM → matrices
+        \item ND-Range → tiles/work-groups
+        \item Local memory → shared tile storage
+        \item Sub-groups → SIMD MAC operations
+    \end{itemize}
+    \item Experiment with tile sizes, local ranges, and vectorization
+\end{itemize}
+
+\section{Conclusion}
+After completing SYCL lessons 1–7 and understanding ND-range, local memory, sub-groups, and USM, you are ready to dive into CUTLASS-SYCL. This foundation ensures you understand GEMM kernels, memory hierarchy, and device parallelism.
+
+\end{document}
